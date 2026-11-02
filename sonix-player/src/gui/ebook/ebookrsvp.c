@@ -804,6 +804,9 @@ void ebookrsvp_show(lv_obj_t *page_box, ebook_t *open_book, uint32_t block, uint
 	// Whatever the box held -- a page, or the view before this one, which
 	// nulls `view` and the rest through view_deleted_cb -- goes.
 	lv_obj_clean(box);
+	// The box may have just been resized for this book, before its screen is
+	// up: its width has to be real before the labels are placed by it.
+	lv_obj_update_layout(box);
 	uint32_t count = ebook_block_count(book);
 	if (block >= count) {
 		block = count ? count - 1u : 0;
