@@ -798,12 +798,12 @@ void ebookrsvp_show(lv_obj_t *page_box, ebook_t *open_book, uint32_t block, uint
 	box = page_box;
 	book = open_book;
 	look = *page_look;
-	if (view) {
-		lv_obj_delete(view); // nulls `view` and the rest through view_deleted_cb
-	}
 	if (!box || !book) {
 		return;
 	}
+	// Whatever the box held -- a page, or the view before this one, which
+	// nulls `view` and the rest through view_deleted_cb -- goes.
+	lv_obj_clean(box);
 	uint32_t count = ebook_block_count(book);
 	if (block >= count) {
 		block = count ? count - 1u : 0;
