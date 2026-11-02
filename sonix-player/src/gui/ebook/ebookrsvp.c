@@ -37,9 +37,9 @@ typedef struct {
 	uint32_t offset; // the byte, from the start of the block
 	uint32_t end;	 // the byte after it
 	char text[WORD_MAX];
-	uint32_t cps;	// how many characters
-	uint8_t style;	// EBOOK_STYLE_* of the span it starts in
-	bool cjk;		// a single kana, kanji or hanzi, with its marks
+	uint32_t cps;		// how many characters
+	uint8_t style;		// EBOOK_STYLE_* of the span it starts in
+	bool cjk;			// a single kana, kanji or hanzi, with its marks
 	bool clause_end;	// ends with a comma, a semicolon or a colon
 	bool sentence_end;	// ends with a full stop, ! ? or an ellipsis, quotes after them included
 	bool paragraph_end; // the last word of its block
@@ -57,9 +57,7 @@ static gui_config_t *g_cfg;
 static const ebookrsvp_hooks_t *hooks;
 static ebook_t *book;
 
-static bool is_space(uint32_t cp) {
-	return cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r' || cp == 0x00A0 || (cp >= 0x2000 && cp <= 0x200B) || cp == 0x202F || cp == 0x205F || cp == 0x3000;
-}
+static bool is_space(uint32_t cp) { return cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r' || cp == 0x00A0 || (cp >= 0x2000 && cp <= 0x200B) || cp == 0x202F || cp == 0x205F || cp == 0x3000; }
 
 // Every character from U+3000 up, which is where the kana, the kanji and the
 // hanzi are. Checked after is_space(), which takes U+3000 itself.
@@ -136,19 +134,13 @@ static bool closes_quote(uint32_t cp) {
 	}
 }
 
-static bool ends_sentence(uint32_t cp) {
-	return cp == '.' || cp == '!' || cp == '?' || cp == 0x2026 || cp == 0x3002 || cp == 0xFF01 || cp == 0xFF1F || cp == 0xFF0E;
-}
+static bool ends_sentence(uint32_t cp) { return cp == '.' || cp == '!' || cp == '?' || cp == 0x2026 || cp == 0x3002 || cp == 0xFF01 || cp == 0xFF1F || cp == 0xFF0E; }
 
-static bool ends_clause(uint32_t cp) {
-	return cp == ',' || cp == ';' || cp == ':' || cp == 0x3001 || cp == 0xFF0C || cp == 0xFF1B || cp == 0xFF1A;
-}
+static bool ends_clause(uint32_t cp) { return cp == ',' || cp == ';' || cp == ':' || cp == 0x3001 || cp == 0xFF0C || cp == 0xFF1B || cp == 0xFF1A; }
 
 // A letter from a right-to-left script. The pivot is a left-to-right idea,
 // so such a word is centred whole instead.
-static bool is_rtl(uint32_t cp) {
-	return (cp >= 0x0590 && cp <= 0x08FF) || (cp >= 0xFB1D && cp <= 0xFDFF) || (cp >= 0xFE70 && cp <= 0xFEFF);
-}
+static bool is_rtl(uint32_t cp) { return (cp >= 0x0590 && cp <= 0x08FF) || (cp >= 0xFB1D && cp <= 0xFDFF) || (cp >= 0xFE70 && cp <= 0xFEFF); }
 
 // Reads the character of `b` at byte `*at` and moves past it. False at the
 // end of the block. The spans of a block are walked from the first every
@@ -175,9 +167,7 @@ static bool block_char(const ebook_block_t *b, uint32_t *at, ch_t *c) {
 
 static bool text_block(const ebook_block_t *b) { return b->type != EBOOK_BLOCK_IMAGE && b->type != EBOOK_BLOCK_RULE; }
 
-static bool western_letter(uint32_t cp) {
-	return cp >= 0x80 || (cp >= '0' && cp <= '9') || (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z');
-}
+static bool western_letter(uint32_t cp) { return cp >= 0x80 || (cp >= '0' && cp <= '9') || (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z'); }
 
 // The first word of block `index` that starts at or after byte `at`. False
 // when the block has none left.
