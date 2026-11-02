@@ -592,8 +592,9 @@ static void render_line(void) {
 
 	line_group = lv_spangroup_create(view);
 	lv_obj_set_clickable(line_group, false);
+	// A fixed size, so the group wraps at the width and clips what is below
+	// its one line should the measure above ever be a pixel out.
 	lv_spangroup_set_overflow(line_group, LV_SPAN_OVERFLOW_CLIP);
-	lv_spangroup_set_mode(line_group, LV_SPAN_MODE_BREAK);
 	lv_obj_set_style_text_line_space(line_group, look.line_space, 0);
 
 	const lv_font_t *regular = ebookfonts_face(false, false);
