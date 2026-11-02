@@ -2048,16 +2048,15 @@ static void build_chapters(void);
 static void build_font(void);
 static void build_theme(void);
 
+static void menu_body_clear(void);
+
 static void menu_close(void) {
 	if (menu_veil) {
 		lv_obj_set_hidden(menu_veil, true);
 	}
-	if (menu_body) {
-		// The rows of a long chapter list are the one thing in here worth not
-		// keeping around while a book is being read.
-		lv_obj_clean(menu_body);
-		chapters_built = 0;
-	}
+	// The rows of a long chapter list are the one thing in here worth not
+	// keeping around while a book is being read.
+	menu_body_clear();
 	// The ticker goes on where the menu interrupted it, unless the menu was
 	// used to leave the view.
 	if (rsvp_resume_after_menu) {
@@ -2090,8 +2089,7 @@ static void section_open(lv_event_t *e) {
 	section_t which = (section_t)(intptr_t)lv_event_get_user_data(e);
 	static const char *const SECTION_TITLES[] = {"chapters", "ebookreader_font_settings", "ebookreader_book_theme"};
 
-	lv_obj_clean(menu_body);
-	chapters_built = 0;
+	menu_body_clear();
 	menu_section = which;
 	lv_label_set_text(menu_heading, tr(SECTION_TITLES[which]));
 	switch (which) {
@@ -2112,8 +2110,7 @@ static void section_open(lv_event_t *e) {
 
 static void section_back_cb(lv_event_t *e) {
 	(void)e;
-	lv_obj_clean(menu_body);
-	chapters_built = 0;
+	menu_body_clear();
 	lv_obj_set_hidden(menu_card, true);
 	lv_obj_set_hidden(menu_bar, false);
 }
@@ -2136,6 +2133,9 @@ static void chapter_pick_cb(lv_event_t *e) {
 	uint32_t spine = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
 	menu_close();
 	load_chapter(spine, 0, 0);
+	if (rsvp_on()) {
+		ebookrsvp_settle(); // a chapter of pictures alone has no word to show
+	}
 }
 
 // One entry of the chapter list.
@@ -2292,6 +2292,19 @@ static const text_option_def_t TEXT_OPTIONS[OPT_COUNT] = {
 // as part of the name, and the thing the buttons change should be the thing
 // between them.
 static lv_obj_t *stepper_values[OPT_COUNT];
+
+// Empties the card's body, and forgets the stepper labels that were in it:
+// steppers_refresh() writes to every one it still knows, and a label the
+// clean deleted would be written through a dangling pointer.
+static void menu_body_clear(void) {
+	if (menu_body) {
+		lv_obj_clean(menu_body);
+	}
+	chapters_built = 0;
+	for (int i = 0; i < OPT_COUNT; i++) {
+		stepper_values[i] = NULL;
+	}
+}
 
 static void steppers_refresh(void) {
 	for (int i = 0; i < OPT_COUNT; i++) {
@@ -2527,6 +2540,9 @@ static void mode_cb(lv_event_t *e) {
 	page_stack_depth = 0;
 	page_number_recount();
 	show_page();
+	if (rsvp_on()) {
+		ebookrsvp_settle(); // the page may have been a picture alone
+	}
 }
 
 // One way of turning a page, or one way of reading: the icon when there is
@@ -2896,6 +2912,9 @@ void ebookreader_open(const char *path) {
 	if (!load_chapter(spine, block, offset)) {
 		load_chapter(0, 0, 0);
 	}
+	if (rsvp_on()) {
+		ebookrsvp_settle(); // a book that opens on its cover page opens on its first word
+	}
 
 	// A page of a book is looked at for minutes without a finger touching the
 	// glass, which is exactly what the screen timeout is for -- so it is held
@@ -2984,6 +3003,11 @@ void ebookreader_init(gui_config_t *cfg) {
 
 bool ebookreader_key(gui_key_t key) {
 	if (lv_screen_active() != ebookreader_screen || !book || !rsvp_on()) {
+		return false;
+	}
+	// Not under the menu: the ticker is waiting for it to close, and a key
+	// that started it there would run the words behind the veil.
+	if (menu_veil && !lv_obj_is_hidden(menu_veil)) {
 		return false;
 	}
 	switch (key) {

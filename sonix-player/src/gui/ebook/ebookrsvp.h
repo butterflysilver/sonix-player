@@ -82,6 +82,12 @@ void ebookrsvp_set_wpm(int wpm, bool flash);
 // ticker keeps running if it was.
 void ebookrsvp_show(lv_obj_t *box, ebook_t *book, uint32_t block, uint32_t offset, const ebookrsvp_look_t *look);
 
+// For the reader to call once it has put a chapter up by itself -- the book
+// opened, a chapter picked, the mode changed: a chapter with no word in it (a
+// cover page, a chapter of illustrations) is passed over for the next one
+// that has, so the view never opens on nothing.
+void ebookrsvp_settle(void);
+
 // The reader is leaving the view -- another mode, or the book is closed. The
 // ticker stops and the book is forgotten; the reader deletes the objects.
 void ebookrsvp_hide(void);

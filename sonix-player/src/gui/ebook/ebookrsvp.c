@@ -60,7 +60,10 @@ static ebook_t *book;
 static bool is_space(uint32_t cp) { return cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r' || cp == 0x00A0 || (cp >= 0x2000 && cp <= 0x200B) || cp == 0x202F || cp == 0x205F || cp == 0x3000; }
 
 // Every character from U+3000 up, which is where the kana, the kanji and the
-// hanzi are. Checked after is_space(), which takes U+3000 itself.
+// hanzi are. Checked after is_space(), which takes U+3000 itself. Hangul is
+// above U+3000 too and so is split a syllable at a time, on purpose: it is
+// the same rule the pages break a line by (chars_that_fit), so a bookmark
+// made there and one made here agree.
 static bool is_cjk(uint32_t cp) { return cp >= 0x3000; }
 
 // A mark that stays with the character before it: the ideographic comma and
@@ -287,6 +290,17 @@ static bool prev_word(uint32_t block, uint32_t offset, word_t *w) {
 	}
 }
 
+// Moves `w` back to the first word of its sentence.
+static void sentence_start(word_t *w) {
+	for (;;) {
+		word_t earlier;
+		if (!prev_word(w->block, w->offset, &earlier) || earlier.sentence_end || earlier.paragraph_end) {
+			return;
+		}
+		*w = earlier;
+	}
+}
+
 // Which character of the word the eye is parked on: the first of a short
 // word, then one step right for every four more letters, never past the
 // fifth.
@@ -491,6 +505,10 @@ static void drop_line(void) {
 
 // Puts the three labels and the ticks where the word on screen wants them.
 static void render_word(void) {
+	// The one place ebookfonts_large_face() is asked, and so the one place the
+	// large set may be closed and reopened at another size. It is always
+	// reached right after build_view() made fresh labels that point at the
+	// page face, so no live label ever points at a large face being deleted.
 	drop_line();
 	if (!have_word) {
 		lv_label_set_text(label_left, "");
@@ -680,15 +698,60 @@ static void schedule(void) {
 	}
 }
 
+// The block the view was shown at, for a chapter that has no word to stand
+// on: a cover page, a chapter of illustrations.
+static uint32_t shown_block;
+
+// Tells the reader where the reading is: the word on screen or, when the
+// chapter has none, the block the view was shown at -- always a block the
+// chapter has, so that no position outside it is ever written down.
 static void moved(void) {
-	if (hooks && hooks->moved && have_word) {
-		hooks->moved(cur.block, cur.offset);
+	if (!hooks || !hooks->moved) {
+		return;
 	}
+	if (have_word) {
+		hooks->moved(cur.block, cur.offset);
+	} else {
+		hooks->moved(shown_block, 0);
+	}
+}
+
+// Loads the chapters in `direction` one after another until one with a word
+// in it is up, so a cover page or a chapter of illustrations is passed over
+// rather than stopped on. Each load calls ebookrsvp_show(). False when the
+// book ran out that way; the chapter and the word that were up are then put
+// back, so nothing is lost by trying.
+static bool go_chapter(int direction) {
+	if (!hooks || !hooks->load_chapter) {
+		return false;
+	}
+	uint32_t origin = ebook_chapter_index(book);
+	bool had = have_word;
+	word_t was = cur;
+	uint32_t count = ebook_spine_count(book);
+	uint32_t spine = origin;
+	for (;;) {
+		if (direction > 0 ? spine + 1u >= count : spine == 0) {
+			break;
+		}
+		spine = direction > 0 ? spine + 1u : spine - 1u;
+		// A chapter that cannot be read is passed over like one with no words.
+		if (hooks->load_chapter(spine, direction > 0 ? 0 : UINT32_MAX, 0, direction) && have_word) {
+			return true;
+		}
+	}
+	hooks->load_chapter(origin, had ? was.block : 0, had ? was.offset : 0, 0);
+	return false;
 }
 
 static void set_playing(bool on) {
 	if (!ticker) {
 		return;
+	}
+	if (on && book && !have_word) {
+		// Started on a page with no words: the first chapter after it that has
+		// some, which is where a book that opens on its cover begins.
+		go_chapter(+1);
 	}
 	playing = on && book && have_word;
 	if (playing) {
@@ -702,8 +765,8 @@ static void set_playing(bool on) {
 }
 
 // Moves to the word after this one, or the line after this one, and on into
-// the next chapter at the end of this one. At the end of the book the ticker
-// stops where it is.
+// the next chapter with words at the end of this one. At the end of the book
+// the ticker stops where it is.
 static void advance(void) {
 	uint32_t from = mode == RSVP_MODE_LINE ? line_end : cur.end;
 	word_t next;
@@ -714,8 +777,7 @@ static void advance(void) {
 		schedule();
 		return;
 	}
-	uint32_t spine = ebook_chapter_index(book);
-	if (spine + 1u < ebook_spine_count(book) && hooks && hooks->load_chapter && hooks->load_chapter(spine + 1u, 0, 0, +1)) {
+	if (go_chapter(+1)) {
 		return; // ebookrsvp_show() has run and the ticker goes on
 	}
 	set_playing(false);
@@ -798,21 +860,37 @@ void ebookrsvp_show(lv_obj_t *page_box, ebook_t *open_book, uint32_t block, uint
 	// up: its width has to be real before the labels are placed by it.
 	lv_obj_update_layout(box);
 	uint32_t count = ebook_block_count(book);
+	bool at_end = block == UINT32_MAX;
 	if (block >= count) {
 		block = count ? count - 1u : 0;
 		offset = 0;
 	}
+	shown_block = block;
 	build_view();
-	have_word = next_word(block, offset, &cur);
+	if (at_end) {
+		// Arrived from the chapter after this one: its last sentence, which is
+		// what going back a sentence from there means.
+		have_word = prev_word(count, 0, &cur);
+		if (have_word) {
+			sentence_start(&cur);
+		}
+	} else {
+		have_word = next_word(block, offset, &cur);
+	}
 	render();
 	moved();
-	if (playing) {
-		if (have_word) {
-			schedule();
-			lv_timer_reset(ticker);
-		} else {
-			set_playing(false);
-		}
+	// A chapter with no word in it leaves the ticker as it is: whoever loaded
+	// the chapter -- go_chapter() -- is on its way past it, and should a tick
+	// come first, tick_cb() stops.
+	if (playing && have_word) {
+		schedule();
+		lv_timer_reset(ticker);
+	}
+}
+
+void ebookrsvp_settle(void) {
+	if (book && !have_word) {
+		go_chapter(+1);
 	}
 }
 
@@ -852,10 +930,10 @@ void ebookrsvp_toggle(void) {
 
 bool ebookrsvp_playing(void) { return playing; }
 
-// The word that begins the sentence after this one, or false at the end of
-// the chapter.
+// The word that begins the sentence after this one -- after the line on
+// screen, in the one-line mode -- or false at the end of the chapter.
 static bool sentence_after(word_t *w) {
-	word_t probe = cur;
+	word_t probe = mode == RSVP_MODE_LINE && line_words > 0 ? line_last : cur;
 	for (;;) {
 		bool ends = probe.sentence_end || probe.paragraph_end;
 		if (!next_word(probe.block, probe.end, &probe)) {
@@ -875,24 +953,17 @@ static bool sentence_before(word_t *w) {
 	if (!prev_word(cur.block, cur.offset, &probe)) {
 		return false;
 	}
-	for (;;) {
-		word_t earlier;
-		if (!prev_word(probe.block, probe.offset, &earlier) || earlier.sentence_end || earlier.paragraph_end) {
-			break;
-		}
-		probe = earlier;
-	}
+	sentence_start(&probe);
 	*w = probe;
 	return true;
 }
 
 void ebookrsvp_skip_sentence(int direction) {
-	if (!book || !have_word) {
+	if (!book) {
 		return;
 	}
 	word_t target;
-	bool found = direction > 0 ? sentence_after(&target) : sentence_before(&target);
-	if (found) {
+	if (have_word && (direction > 0 ? sentence_after(&target) : sentence_before(&target))) {
 		cur = target;
 		render();
 		moved();
@@ -905,15 +976,10 @@ void ebookrsvp_skip_sentence(int direction) {
 		}
 		return;
 	}
-	// Over the chapter's edge: the next chapter from its start, or the last
-	// paragraph of the one before.
-	uint32_t spine = ebook_chapter_index(book);
-	if (!hooks || !hooks->load_chapter) {
-		return;
-	}
-	if (direction > 0 && spine + 1u < ebook_spine_count(book)) {
-		hooks->load_chapter(spine + 1u, 0, 0, +1);
-	} else if (direction < 0 && spine > 0) {
-		hooks->load_chapter(spine - 1u, UINT32_MAX, 0, -1);
+	// Over the chapter's edge: the first sentence of the next chapter that
+	// has one, or the last sentence of the nearest one before.
+	go_chapter(direction);
+	if (hooks && hooks->save) {
+		hooks->save();
 	}
 }
